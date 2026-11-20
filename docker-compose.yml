@@ -1,0 +1,52 @@
+services:
+  vaultstage-nas:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vaultstage-nas
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HARD_DISK_PATH: "${HARD_DISK_PATH:-/data/staging}"
+      CLOUD_REMOTE: "${CLOUD_REMOTE:-localcloud:/data/cloud}"
+      RCLONE_CONFIG_PATH: "${RCLONE_CONFIG_PATH:-/config/rclone/rclone.conf}"
+      DATABASE_URL: "${DATABASE_URL:-/data/db/nas.sqlite}"
+      SECRET_KEY: "${SECRET_KEY:-change-me-generate-with-openssl-rand-hex-32}"
+      MAX_UPLOAD_SIZE: "${MAX_UPLOAD_SIZE:-1073741824}"
+      DEFAULT_USER_QUOTA: "${DEFAULT_USER_QUOTA:-5368709120}"
+      UPLOAD_CHUNK_SIZE: "${UPLOAD_CHUNK_SIZE:-4194304}"
+      SYNC_CONCURRENCY: "${SYNC_CONCURRENCY:-2}"
+      SYNC_RETRY_LIMIT: "${SYNC_RETRY_LIMIT:-3}"
+      SYNC_RETRY_BACKOFF: "${SYNC_RETRY_BACKOFF:-5000}"
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-changeme-admin-123}"
+      TRUST_PROXY: "${TRUST_PROXY:-true}"
+    volumes:
+      # Hard Disk local staging volume (files land here first, removed only after verification)
+      - nas_staging:/data/staging
+      # Persistent SQLite database (WAL mode)
+      - nas_db:/data/db
+      # rclone.conf mount directory (replace with host bind mount e.g. ./rclone:/config/rclone:ro for production cloud remotes)
+      - nas_rclone_config:/config/rclone
+      # Optional local cloud backend volume (used by default localcloud: remote out of the box)
+      - nas_local_cloud:/data/cloud
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  nas_staging:
+  nas_db:
+  nas_rclone_config:
+  nas_local_cloud:

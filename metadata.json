@@ -1,0 +1,8 @@
+{
+  "name": "VaultStage NAS",
+  "description": "Self-hosted multi-user NAS with local disk staging, verified rclone cloud sync, and automatic post-verification staging cleanup.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
