@@ -25,8 +25,14 @@ export interface RequestWithAuth extends Request {
   authSource?: 'cookie' | 'bearer';
 }
 
+export function getBcryptRounds(): number {
+  const parsed = Number.parseInt(process.env.BCRYPT_ROUNDS ?? '', 10);
+  if (!Number.isNaN(parsed) && parsed >= 4 && parsed <= 14) return parsed;
+  return 12;
+}
+
 export function hashPassword(plain: string): string {
-  return bcrypt.hashSync(plain, 12);
+  return bcrypt.hashSync(plain, getBcryptRounds());
 }
 
 export function verifyPassword(plain: string, hash: string): boolean {

@@ -58,7 +58,7 @@ function sanitizeProcessError(stderr: string, configPath: string): string {
 function joinCloudTarget(cloudRemote: string, cloudRelativePath: string): string {
   const cleanRel = cloudRelativePath.replace(/^\/+/, '');
   const { remoteName, basePath } = parseCloudRemoteSpec(cloudRemote);
-  const cleanBase = basePath.replace(/\/+$/, '');
+  const cleanBase = basePath.replace(/\\/g, '/').replace(/\/+$/, '');
   if (!cleanBase) {
     return `${remoteName}:${cleanRel}`;
   }
@@ -67,7 +67,7 @@ function joinCloudTarget(cloudRemote: string, cloudRelativePath: string): string
 
 function joinCloudBase(cloudRemote: string): string {
   const { remoteName, basePath } = parseCloudRemoteSpec(cloudRemote);
-  const cleanBase = basePath.replace(/\/+$/, '');
+  const cleanBase = basePath.replace(/\\/g, '/').replace(/\/+$/, '');
   return cleanBase ? `${remoteName}:${cleanBase}` : `${remoteName}:`;
 }
 

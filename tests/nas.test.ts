@@ -19,6 +19,9 @@ import {
   resolveUserStagingPath,
 } from '../server/pathSecurity.ts';
 
+// Keep test suite snappy & prevent synchronous bcryptjs CPU stalls from starving loopback TCP accepts on Windows
+process.env.BCRYPT_ROUNDS = '4';
+
 interface TestHarness {
   ctx: NasApplicationContext;
   baseUrl: string;
@@ -80,6 +83,7 @@ async function createTestHarness(overrides?: {
     rcloneConfPath,
     close: async () => {
       ctx.close();
+      server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     },
@@ -97,32 +101,68 @@ async function apiCall(
     headers?: Record<string, string>;
   }
 ): Promise<{ status: number; json: any; buffer: Buffer; headers: Headers }> {
-  const headers: Record<string, string> = { ...(opts?.headers ?? {}) };
+  const headers: Record<string, string> = {
+    Connection: 'close',
+    ...(opts?.headers ?? {}),
+  };
   if (opts?.token) {
     headers.Authorization = `Bearer ${opts.token}`;
   }
-  let body: BodyInit | undefined;
+  let bodyBuf: Buffer | undefined;
   if (opts?.rawBody) {
-    body = new Uint8Array(opts.rawBody);
+    bodyBuf = opts.rawBody;
   } else if (opts?.body !== undefined) {
     headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(opts.body);
+    bodyBuf = Buffer.from(JSON.stringify(opts.body), 'utf8');
+  }
+  if (bodyBuf) {
+    headers['Content-Length'] = String(bodyBuf.length);
   }
 
-  const res = await fetch(`${baseUrl}${urlPath}`, {
-    method: opts?.method ?? 'GET',
-    headers,
-    body,
+  const parsedUrl = new URL(urlPath, baseUrl);
+
+  // Use direct node:http with agent:false (no keep-alive pool) so ephemeral loopback servers
+  // never hit Windows undici socket pool stalls or proxy interception.
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: parsedUrl.hostname,
+        port: Number(parsedUrl.port),
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: opts?.method ?? 'GET',
+        headers,
+        agent: false,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => {
+          const buffer = Buffer.concat(chunks);
+          let json: any = null;
+          try {
+            json = JSON.parse(buffer.toString('utf8'));
+          } catch {
+            // non-json response (e.g. binary download)
+          }
+          const respHeaders = new Headers();
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (Array.isArray(v)) {
+              for (const item of v) respHeaders.append(k, item);
+            } else if (v !== undefined) {
+              respHeaders.set(k, v);
+            }
+          }
+          resolve({ status: res.statusCode ?? 0, json, buffer, headers: respHeaders });
+        });
+      }
+    );
+
+    req.on('error', reject);
+    if (bodyBuf) {
+      req.write(bodyBuf);
+    }
+    req.end();
   });
-  const arrayBuf = await res.arrayBuffer();
-  const buffer = Buffer.from(arrayBuf);
-  let json: any = null;
-  try {
-    json = JSON.parse(buffer.toString('utf8'));
-  } catch {
-    // non-json response (e.g. binary download)
-  }
-  return { status: res.status, json, buffer, headers: res.headers };
 }
 
 async function loginAndBootstrapAdmin(baseUrl: string): Promise<{ token: string; userId: string }> {
@@ -318,10 +358,15 @@ test('Path security: blocks traversal, encoded traversal, null bytes, and symlin
       assert.throws(() => normalizeRelativePath(p), PathSecurityError, `Should reject path: ${p}`);
     }
 
-    // Create a symlink inside user's staging namespace pointing outside
+    // Create a symlink (or directory junction on Windows, which needs no elevated privileges)
+    // inside the user's staging namespace pointing outside
     const userDir = path.join(stagingDir, 'usr_testuser01');
     fs.mkdirSync(userDir, { recursive: true });
-    fs.symlinkSync(tmpRoot, path.join(userDir, 'escape_link'));
+    fs.symlinkSync(
+      tmpRoot,
+      path.join(userDir, 'escape_link'),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    );
 
     assert.throws(
       () => resolveUserStagingPath(stagingDir, 'usr_testuser01', 'escape_link/outside-secret.txt'),

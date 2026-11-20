@@ -144,7 +144,9 @@ function bootstrapAdmin(db: Database.Database, config: EnvConfig): void {
   if (existingAdmin) return;
 
   const adminId = generateId('usr');
-  const passwordHash = bcrypt.hashSync(config.adminPassword, 12);
+  const parsedRounds = Number.parseInt(process.env.BCRYPT_ROUNDS ?? '', 10);
+  const rounds = !Number.isNaN(parsedRounds) && parsedRounds >= 4 && parsedRounds <= 14 ? parsedRounds : 12;
+  const passwordHash = bcrypt.hashSync(config.adminPassword, rounds);
 
   db.prepare(
     `INSERT INTO users (id, username, display_name, password_hash, role, is_active, must_change_password, quota_bytes)
